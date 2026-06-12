@@ -19,7 +19,7 @@
     <!-- Chart.js para Gráficos Dinâmicos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-    <!-- Inclusão do Supabase SDK (Carregado na HEAD para garantir a inicialização estável) -->
+    <!-- SDK do Supabase carregado na HEAD para evitar erros de inicialização -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
     <style>
@@ -32,6 +32,10 @@
             background-size: 40px 40px;
         }
         
+        .custom-scroll {
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch;
+        }
         .custom-scroll::-webkit-scrollbar {
             width: 6px;
             height: 6px;
@@ -78,7 +82,11 @@
                 <p class="text-xs text-slate-400 font-medium uppercase tracking-widest">Painel Administrativo do Proprietário</p>
             </div>
         </div>
-        <div class="flex items-center space-x-6">
+        <div class="flex items-center space-x-4">
+            <!-- NOVO: Alternador Dinâmico de Exibição dos Gráficos -->
+            <button onclick="toggleDashboard()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition duration-150 shadow-md">
+                <i class="fa-solid fa-chart-line mr-2"></i> Dashboard: <span id="btn-toggle-dash-text" class="text-teal-400">ON</span>
+            </button>
             <div class="text-right border-r pr-6 border-slate-800">
                 <p class="text-sm font-black text-slate-200 leading-none">Administração</p>
                 <p class="text-[10px] text-teal-500 font-black uppercase tracking-wider mt-1">Diretoria</p>
@@ -89,8 +97,8 @@
 
     <div class="flex flex-1 h-[calc(100vh-80px)] overflow-hidden p-6 gap-6">
         
-        <!-- COLUNA ESQUERDA: LISTA GERAL DE ORDENS (40%) -->
-        <aside class="w-[45%] flex flex-col h-full bg-[#111827]/60 rounded-3xl border border-slate-800 p-6 shadow-2xl min-w-[400px]">
+        <!-- COLUNA ESQUERDA: LISTA GERAL DE ORDENS (45% por padrão, se expande para 100% ao desligar o dashboard) -->
+        <aside id="sidebar-container" class="w-[45%] flex flex-col h-full bg-[#111827]/60 rounded-3xl border border-slate-800 p-6 shadow-2xl min-w-[400px] transition-all duration-300">
             <div class="flex justify-between items-center mb-6">
                 <h2 class="text-lg font-black uppercase tracking-widest text-slate-200 italic">Fila Geral de Produção</h2>
                 <button onclick="loadAdminDashboard()" class="text-teal-500 hover:rotate-180 transition-all duration-500 text-lg">
@@ -123,8 +131,8 @@
             </div>
         </aside>
 
-        <!-- COLUNA DIREITA: INDICADORES E BI (55%) -->
-        <main class="flex-1 flex flex-col h-full gap-6 overflow-y-auto custom-scroll pr-1">
+        <!-- COLUNA DIREITA: INDICADORES, ESTEIRA DE PRODUÇÃO E GRÁFICOS (55%) -->
+        <main id="main-container" class="flex-1 flex flex-col h-full gap-6 overflow-y-auto custom-scroll pr-1 transition-all duration-300">
             
             <!-- SEÇÃO DE INDICADORES (KPIs) -->
             <div class="grid grid-cols-4 gap-4">
@@ -146,8 +154,18 @@
                 </div>
             </div>
 
+            <!-- NOVO: ESTEIRA DE PRODUÇÃO EM TEMPO REAL (FLUXO LINEAR) -->
+            <div class="bg-[#111827]/60 rounded-3xl border border-slate-800 p-6 flex flex-col shadow-xl">
+                <h3 class="text-xs font-black text-slate-200 uppercase tracking-widest mb-4 flex items-center border-b border-slate-800 pb-3">
+                    <i class="fa-solid fa-truck-fast mr-2 text-teal-500"></i> Esteira do Processo Produtivo (Fluxo de Turbinas)
+                </h3>
+                <div id="production-conveyor" class="flex gap-4 overflow-x-auto pb-4 custom-scroll">
+                    <!-- Gerado dinamicamente via JS -->
+                </div>
+            </div>
+
             <!-- SEÇÃO DE GRÁFICOS (BI) -->
-            <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 flex-1 min-h-[350px]">
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 min-h-[350px]">
                 
                 <!-- GRÁFICO 1: DISTRIBUIÇÃO POR SETOR -->
                 <div class="bg-[#111827]/60 rounded-3xl border border-slate-800 p-6 flex flex-col shadow-xl">
@@ -231,15 +249,34 @@
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpnaGFxbGFxb3pzc2tmbGRnc2ZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkyMDY1MzQsImV4cCI6MjA4NDc4MjUzNH0.aC2DMOUNhS2uK6KGI5Sf2c2vGhrCKHMnRyZhL3WwSus'; 
         const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        const API_QUEUE = 'https://webhook.mareflow.com.br/webhook/production/disassembly-queue'; // Buscaremos toda a base via Supabase
+        const API_QUEUE = 'https://webhook.mareflow.com.br/webhook/production/disassembly-queue'; 
         
         let allOrders = [];
         let filteredOrders = [];
+        let queueData = [];
         let currentFilterSection = 'TODAS';
+        let isDashboardVisible = true;
         
         // Instâncias Globais dos Gráficos
         let sectorChartInstance = null;
         let urgencyChartInstance = null;
+
+        // Estágios e Setores Oficiais do Sistema TurboSul
+        const STATIONS = [
+            { key: 'PRE_VENDAS', label: '1. Pré-Vendas', color: 'border-blue-500/20 bg-blue-950/10 text-blue-400' },
+            { key: 'ANALISE_TECNICA', label: '2. Análise Técnica', color: 'border-blue-600/20 bg-blue-950/20 text-blue-300' },
+            { key: 'VENDAS', label: '3. Vendas', color: 'border-indigo-500/20 bg-indigo-950/10 text-indigo-400' },
+            { key: 'TRIAGEM', label: '4. Triagem', color: 'border-purple-500/20 bg-purple-950/10 text-purple-400' },
+            { key: 'DESMONTAGEM', label: '5. Desmontagem', color: 'border-teal-500/20 bg-teal-950/10 text-teal-400' },
+            { key: 'RETIFICA', label: '6. Retífica', color: 'border-emerald-500/20 bg-emerald-950/10 text-emerald-400' },
+            { key: 'SOLDA', label: '7. Solda', color: 'border-orange-500/20 bg-orange-950/10 text-orange-400' },
+            { key: 'METROLOGIA', label: '8. Metrologia', color: 'border-pink-500/20 bg-pink-950/10 text-pink-400' },
+            { key: 'BANCADA', label: '9. Bancada', color: 'border-rose-500/20 bg-rose-950/10 text-rose-400' },
+            { key: 'BALANCEAMENTO', label: '10. Balanceamento', color: 'border-violet-500/20 bg-violet-950/10 text-violet-400' },
+            { key: 'MONTAGEM', label: '11. Montagem', color: 'border-cyan-500/20 bg-cyan-950/10 text-cyan-400' },
+            { key: 'QUALIDADE', label: '12. Qualidade', color: 'border-red-500/20 bg-red-950/10 text-red-400' },
+            { key: 'EXPEDICAO', label: '13. Expedição', color: 'border-green-500/20 bg-green-950/10 text-green-400' }
+        ];
 
         document.addEventListener('DOMContentLoaded', () => {
             loadAdminDashboard();
@@ -275,6 +312,7 @@
                 filterQueue();
                 updateKPIs();
                 updateCharts();
+                renderConveyorBelt();
 
             } catch (e) {
                 console.error("Erro ao carregar Dashboard Geral:", e);
@@ -282,10 +320,102 @@
             }
         }
 
+        // Alterna entre exibir os gráficos/BI ou recolher dando foco total na fila de OS (100% largura)
+        function toggleDashboard() {
+            isDashboardVisible = !isDashboardVisible;
+            const sidebar = document.getElementById('sidebar-container');
+            const main = document.getElementById('main-container');
+            const btnText = document.getElementById('btn-toggle-dash-text');
+
+            if (isDashboardVisible) {
+                sidebar.className = "w-[45%] flex flex-col h-full bg-[#111827]/60 rounded-3xl border border-slate-800 p-6 shadow-2xl min-w-[400px] transition-all duration-300";
+                main.classList.remove('hidden');
+                btnText.innerText = 'ON';
+                btnText.className = 'text-teal-400';
+                setTimeout(updateCharts, 310); // Aguarda a transição CSS e redesenha os gráficos
+            } else {
+                sidebar.className = "w-full flex flex-col h-full bg-[#111827]/60 rounded-3xl border border-slate-800 p-6 shadow-2xl transition-all duration-300";
+                main.classList.add('hidden');
+                btnText.innerText = 'OFF';
+                btnText.className = 'text-slate-400';
+            }
+        }
+
+        // Determina onde uma OS se encontra dentro das 13 estações
+        function getOSActiveStations(os) {
+            const status = (os.status || '').toUpperCase().trim();
+            const activeStations = [];
+
+            if (status.includes('TRIAGEM')) {
+                activeStations.push('TRIAGEM');
+            } else if (status.includes('ANÁLISE TÉCNICA') || status.includes('ANALISE-TECNICA') || status.includes('ANALISE TECNICA')) {
+                activeStations.push('ANALISE_TECNICA');
+            } else if (status.includes('VENDAS') || status.includes('COMERCIAL')) {
+                activeStations.push('VENDAS');
+            } else if (status.includes('DESMONTAGEM')) {
+                activeStations.push('DESMONTAGEM');
+            } else if (status.includes('CONTROLE DE QUALIDADE') || status.includes('QUALIDADE')) {
+                activeStations.push('QUALIDADE');
+            } else if (status.includes('EXPEDIÇÃO') || status.includes('EXPEDICAO') || status.includes('CONCLUÍDA')) {
+                activeStations.push('EXPEDICAO');
+            } else if (status === 'EM PRODUÇÃO') {
+                const tracking = os.tracking || [];
+                tracking.forEach(t => {
+                    const stage = (t.current_stage || t.stage || '').toUpperCase().trim();
+                    if (stage === 'RETIFICA') activeStations.push('RETIFICA');
+                    else if (stage === 'SOLDA') activeStations.push('SOLDA');
+                    else if (stage === 'METROLOGIA') activeStations.push('METROLOGIA');
+                    else if (stage === 'BANCADA') activeStations.push('BANCADA');
+                    else if (stage === 'BALANCEAMENTO') activeStations.push('BALANCEAMENTO');
+                    else if (stage === 'MONTAGEM') activeStations.push('MONTAGEM');
+                });
+            }
+
+            if (activeStations.length === 0 && (status.includes('PENDENTE') || status.includes('ENTRADA'))) {
+                activeStations.push('PRE_VENDAS');
+            }
+
+            return [...new Set(activeStations)];
+        }
+
+        // Desenha a esteira horizontal com todas as turbinas ativas nas suas respectivas posições
+        function renderConveyorBelt() {
+            const container = document.getElementById('production-conveyor');
+            if (!container) return;
+
+            container.innerHTML = '';
+
+            STATIONS.forEach(station => {
+                const activeOSs = allOrders.filter(os => {
+                    if (os.status === 'Concluída' || os.status === 'Cancelada') return false;
+                    const activeStations = getOSActiveStations(os);
+                    return activeStations.includes(station.key);
+                });
+
+                const osTags = activeOSs.map(os => `
+                    <div onclick="openDeepDiveModal('${os.id}')" 
+                         class="px-2.5 py-1.5 bg-slate-900 border border-slate-800 hover:border-teal-500 rounded-xl text-[10px] font-black uppercase text-center cursor-pointer transition-all">
+                        ${os.business_id}
+                    </div>
+                `).join('');
+
+                container.innerHTML += `
+                    <div class="flex-shrink-0 w-48 border-2 border-dashed rounded-3xl p-4 flex flex-col ${station.color}">
+                        <div class="flex justify-between items-center mb-3">
+                            <span class="text-xs font-black uppercase tracking-wider">${station.label}</span>
+                            <span class="text-[10px] font-black px-2 py-0.5 rounded bg-white/5">${activeOSs.length}</span>
+                        </div>
+                        <div class="flex flex-col gap-2 overflow-y-auto max-h-32 pr-1 custom-scroll">
+                            ${osTags || '<span class="text-[9px] text-slate-500 italic uppercase text-center py-2">Sem turbinas</span>'}
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
         function setFilter(section) {
             currentFilterSection = section;
             
-            // Atualiza classe dos botões de filtro
             const buttons = {
                 'TODAS': 'filter-all',
                 'TRIAGEM': 'filter-triage',
@@ -313,7 +443,6 @@
             const searchQuery = document.getElementById('search-queue').value.trim().toUpperCase();
             
             filteredOrders = allOrders.filter(os => {
-                // Filtro de Texto (OS, Cliente ou Modelo)
                 const matchesSearch = 
                     os.business_id.toUpperCase().includes(searchQuery) ||
                     (os.client || '').toUpperCase().includes(searchQuery) ||
@@ -321,11 +450,8 @@
 
                 if (!matchesSearch) return false;
 
-                // Filtro de Setor/Seção
                 const status = (os.status || '').toUpperCase().trim();
-                const trackingList = os.tracking || [];
                 
-                // Mapeamento lógico de seções
                 switch (currentFilterSection) {
                     case 'TRIAGEM':
                         return status.includes('TRIAGEM');
@@ -336,7 +462,6 @@
                     case 'EXPEDICAO':
                         return status.includes('EXPEDIÇÃO') || status.includes('EXPEDICAO') || status.includes('CONCLUÍDA');
                     case 'PRODUCAO':
-                        // Consideramos Produção se estiver ativo nos setores intermediários (Desmonte, Solda, Retífica, Metrologia, Bancada, Montagem)
                         return !status.includes('TRIAGEM') && !status.includes('STANDBY') && !status.includes('QUALIDADE') && !status.includes('EXPED') && !status.includes('CONCLUÍDA');
                     default:
                         return true;
@@ -360,10 +485,8 @@
                     urgencyColor = 'bg-red-950/60 text-red-400 border border-red-900';
                 }
 
-                // Determina o setor/status atual legível
                 let currentPos = os.status || 'Desmontagem';
                 if (currentPos === 'Em Produção' && os.tracking && os.tracking.length > 0) {
-                    // Pega o setor da última peça rastreada ativa
                     const lastPiece = os.tracking.find(t => t.current_stage);
                     if (lastPiece) currentPos = `Em: ${lastPiece.current_stage}`;
                 }
@@ -399,7 +522,6 @@
         function updateCharts() {
             if (typeof Chart === 'undefined') return;
 
-            // Define fontes brancas e tipografia limpa como padrão
             Chart.defaults.color = '#94a3b8';
             Chart.defaults.font.family = "'JetBrains Mono', monospace";
 
@@ -409,14 +531,12 @@
             allOrders.forEach(os => {
                 const status = (os.status || '').toUpperCase().trim();
                 
-                // 1. Contagem Setores (BI)
                 if (status.includes('TRIAGEM')) triage++;
                 else if (status.includes('DESMONTAGEM')) desmonte++;
                 else if (status.includes('QUALIDADE')) qualidade++;
                 else if (status.includes('EXPEDIÇÃO') || status.includes('EXPEDICAO') || status.includes('CONCLUÍDA')) expedicao++;
                 else if (status === 'EM PRODUÇÃO') producao++;
 
-                // 2. Contagem Urgência (BI)
                 const urg = (os.urgency || 'Normal').toUpperCase().trim();
                 if (urg === 'URGENTE') urgente++;
                 else if (urg === 'ALTA') alta++;
