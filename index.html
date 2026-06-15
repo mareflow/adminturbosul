@@ -166,6 +166,7 @@
                 <button onclick="setFilter('QUALIDADE')" id="filter-quality" class="px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-wider bg-zinc-100 text-zinc-600 hover:bg-zinc-200 border border-zinc-200 transition-all">Qualidade</button>
                 <button onclick="setFilter('EXPEDICAO')" id="filter-dispatch" class="px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-wider bg-zinc-100 text-zinc-600 hover:bg-zinc-200 border border-zinc-200 transition-all">Expedição</button>
                 <button onclick="setFilter('STANDBY')" id="filter-standby" class="px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-wider bg-zinc-100 text-zinc-600 hover:bg-zinc-200 border border-zinc-200 transition-all">Standby</button>
+                <button onclick="setFilter('ARQUIVADO')" id="filter-archived" class="px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-wider bg-zinc-100 text-zinc-600 hover:bg-zinc-200 border border-zinc-200 transition-all">Arquivadas</button>
             </div>
 
             <!-- LISTA DE O.S. (SCROLL RESOLVIDO: min-h-0) -->
@@ -432,7 +433,7 @@
 
             STATIONS.forEach((station, index) => {
                 const activeOSs = allOrders.filter(os => {
-                    if (os.status === 'Concluída' || os.status === 'Cancelada') return false;
+                    if (os.status === 'Concluída' || os.status === 'Cancelada' || os.status === 'Arquivado') return false;
                     return getOSActiveStations(os).includes(station.key);
                 });
 
@@ -461,15 +462,18 @@
 
         function setFilter(section) {
             currentFilterSection = section;
-            const buttons = ['filter-all', 'filter-triage', 'filter-production', 'filter-quality', 'filter-dispatch', 'filter-standby'];
+            const buttons = ['filter-all', 'filter-triage', 'filter-production', 'filter-quality', 'filter-dispatch', 'filter-standby', 'filter-archived'];
             
             buttons.forEach(id => {
                 const btn = document.getElementById(id);
                 if(btn) btn.className = "px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-wider bg-zinc-100 text-zinc-600 hover:bg-zinc-200 border border-zinc-200 transition-all";
             });
 
-            const activeBtn = document.getElementById(`filter-${section.toLowerCase()}`) || document.getElementById('filter-all');
-            activeBtn.className = "px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-wider bg-brand-red text-white border border-brand-red transition-all shadow-sm";
+            const btnId = section === 'ARQUIVADO' ? 'filter-archived' : `filter-${section.toLowerCase()}`;
+            const activeBtn = document.getElementById(btnId) || document.getElementById('filter-all');
+            if (activeBtn) {
+                activeBtn.className = "px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-wider bg-brand-red text-white border border-brand-red transition-all shadow-sm";
+            }
 
             filterQueue();
         }
@@ -481,12 +485,17 @@
                 if (!matchesSearch) return false;
 
                 const status = (os.status || '').toUpperCase().trim();
+                
+                // Oculta os arquivados de todas as abas, exibindo apenas na aba "Arquivadas"
+                if (currentFilterSection !== 'ARQUIVADO' && status === 'ARQUIVADO') return false;
+
                 switch (currentFilterSection) {
                     case 'TRIAGEM': return status.includes('TRIAGEM');
                     case 'STANDBY': return status.includes('STANDBY') || status.includes('CASCO');
                     case 'QUALIDADE': return status.includes('QUALIDADE');
                     case 'EXPEDICAO': return status.includes('EXPEDIÇÃO') || status.includes('EXPEDICAO') || status.includes('CONCLUÍDA');
-                    case 'PRODUCAO': return !status.includes('TRIAGEM') && !status.includes('STANDBY') && !status.includes('QUALIDADE') && !status.includes('EXPED') && !status.includes('CONCLUÍDA');
+                    case 'PRODUCAO': return !status.includes('TRIAGEM') && !status.includes('STANDBY') && !status.includes('QUALIDADE') && !status.includes('EXPED') && !status.includes('CONCLUÍDA') && status !== 'ARQUIVADO';
+                    case 'ARQUIVADO': return status === 'ARQUIVADO';
                     default: return true;
                 }
             });
